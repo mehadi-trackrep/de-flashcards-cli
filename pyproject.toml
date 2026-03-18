@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "de-flashcards-cli"
+version = "0.1.0"
+description = "Data Engineering flashcards in your terminal — static, AI-powered, or from Firestore"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["data-engineering", "flashcards", "cli", "learning", "terminal"]
+
+dependencies = [
+    "anthropic>=0.25.0",
+]
+
+[project.optional-dependencies]
+firestore = [
+    "firebase-admin>=6.0.0",
+]
+all = [
+    "anthropic>=0.25.0",
+    "firebase-admin>=6.0.0",
+]
+
+[project.scripts]
+de-flashcards-cli = "de_flashcards_cli.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/de-flashcards-cli"
+
+# ── hatchling: explicitly point to the package folder ─────────────────────────
+# Needed because the repo folder name may differ from the package name.
+[tool.hatch.build.targets.wheel]
+packages = ["de_flashcards_cli"]
+
+# ── uv settings ────────────────────────────────────────────────────────────────
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
