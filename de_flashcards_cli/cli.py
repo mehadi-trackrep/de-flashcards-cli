@@ -1,107 +1,244 @@
 import random
 import argparse
 import sys
+import shutil
 
 from . import config as cfg
 from .flashcards import FLASHCARDS, TOPICS
 
 
-# ─── Terminal styling (no dependencies) ───────────────────────────────────────
+# ─── Terminal capabilities ─────────────────────────────────────────────────────
 
+def _term_width() -> int:
+    return min(shutil.get_terminal_size((80, 24)).columns, 100)
+
+# ANSI codes
 RESET   = "\033[0m"
 BOLD    = "\033[1m"
 DIM     = "\033[2m"
-CYAN    = "\033[36m"
+ITALIC  = "\033[3m"
+
+# Foreground colors
+BLACK   = "\033[30m"
+RED     = "\033[31m"
 GREEN   = "\033[32m"
 YELLOW  = "\033[33m"
-MAGENTA = "\033[35m"
-RED     = "\033[31m"
 BLUE    = "\033[34m"
+MAGENTA = "\033[35m"
+CYAN    = "\033[36m"
+WHITE   = "\033[37m"
+BWHITE  = "\033[97m"
 
-TOPIC_COLORS = {
-    "sql":       CYAN,
-    "python":    GREEN,
-    "pipeline":  YELLOW,
-    "warehouse": MAGENTA,
-    "streaming": BLUE,
-    "cloud":     "\033[96m",
+# Bright foreground
+BRED    = "\033[91m"
+BGREEN  = "\033[92m"
+BYELLOW = "\033[93m"
+BBLUE   = "\033[94m"
+BMAGENTA= "\033[95m"
+BCYAN   = "\033[96m"
+
+# Background colors
+BG_BLACK   = "\033[40m"
+BG_RED     = "\033[41m"
+BG_GREEN   = "\033[42m"
+BG_YELLOW  = "\033[43m"
+BG_BLUE    = "\033[44m"
+BG_MAGENTA = "\033[45m"
+BG_CYAN    = "\033[46m"
+BG_WHITE   = "\033[47m"
+BG_BBLACK  = "\033[100m"   # bright black (dark gray)
+BG_BRED    = "\033[101m"
+BG_BGREEN  = "\033[102m"
+BG_BYELLOW = "\033[103m"
+BG_BBLUE   = "\033[104m"
+BG_BMAGENTA= "\033[105m"
+BG_BCYAN   = "\033[106m"
+BG_BWHITE  = "\033[107m"
+
+# Per-topic theme: (bg_color, fg_color, accent_color, icon)
+TOPIC_THEMES = {
+    "sql":       (BG_BLUE,    BWHITE,  BCYAN,    "󰆼 "),
+    "python":    (BG_GREEN,   BLACK,   BGREEN,   " "),
+    "pipeline":  (BG_YELLOW,  BLACK,   BYELLOW,  "󰙨 "),
+    "warehouse": (BG_MAGENTA, BWHITE,  BMAGENTA, "󰋡 "),
+    "streaming": (BG_CYAN,    BLACK,   BCYAN,    " "),
+    "cloud":     (BG_BBLUE,   BWHITE,  BBLUE,    "󰅟 "),
 }
 
-def topic_color(topic: str) -> str:
-    return TOPIC_COLORS.get(topic.lower(), CYAN)
+def get_theme(topic: str) -> tuple:
+    return TOPIC_THEMES.get(topic.lower(), (BG_BBLACK, BWHITE, BCYAN, "▸ "))
 
-def badge(label: str, color: str) -> str:
-    return f"{BOLD}{color} {label.upper()} {RESET}"
-
-def rule(char="─", width=62) -> str:
-    return char * width
+def topic_accent(topic: str) -> str:
+    return get_theme(topic)[2]
 
 
-# ─── Banner ───────────────────────────────────────────────────────────────────
+# ─── Drawing primitives ────────────────────────────────────────────────────────
+
+def _pad(text: str, width: int, align: str = "left") -> str:
+    """Pad text to width, ignoring ANSI escape codes in length calc."""
+    import re
+    visible = re.sub(r'\033\[[0-9;]*m', '', text)
+    pad = max(0, width - len(visible))
+    if align == "center":
+        lp = pad // 2
+        return " " * lp + text + " " * (pad - lp)
+    elif align == "right":
+        return " " * pad + text
+    return text + " " * pad
+
+def rule(char: str = "─", width: int = None) -> str:
+    w = width or _term_width()
+    return f"{DIM}{char * w}{RESET}"
+
+def double_rule(width: int = None) -> str:
+    w = width or _term_width()
+    return f"{DIM}{'═' * w}{RESET}"
+
+def blank_line():
+    print()
+
+def card_top(width: int, color: str) -> str:
+    return f"{color}╭{'─' * (width - 2)}╮{RESET}"
+
+def card_mid(width: int, color: str) -> str:
+    return f"{color}├{'─' * (width - 2)}┤{RESET}"
+
+def card_bot(width: int, color: str) -> str:
+    return f"{color}╰{'─' * (width - 2)}╯{RESET}"
+
+def card_row(content: str, width: int, color: str) -> str:
+    inner = width - 4   # 2 for borders + 2 padding
+    padded = _pad(content, inner)
+    return f"{color}│{RESET} {padded} {color}│{RESET}"
+
+
+# ─── Banner ────────────────────────────────────────────────────────────────────
 
 def print_banner():
-    print(f"""
-{BOLD}{CYAN}
-  ██████╗ ███████╗    ███████╗██╗      █████╗ ███████╗██╗  ██╗
-  ██╔══██╗██╔════╝    ██╔════╝██║     ██╔══██╗██╔════╝██║  ██║
-  ██║  ██║█████╗      █████╗  ██║     ███████║███████╗███████║
-  ██║  ██║██╔══╝      ██╔══╝  ██║     ██╔══██║╚════██║██╔══██║
-  ██████╔╝███████╗    ██║     ███████╗██║  ██║███████║██║  ██║
-  ╚═════╝ ╚══════╝    ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
-{RESET}{BOLD}{CYAN}                                                  — MMH{RESET}
-{DIM}  Data Engineering Flashcards — sharpen your skills, one card at a time.
-{RESET}""")
+    w = _term_width()
+    print()
+    print(f"{BOLD}{BCYAN}{'█' * w}{RESET}")
+    print()
+
+    # ASCII art lines (centered)
+    art = [
+        "██████╗ ███████╗    ███████╗██╗      █████╗ ███████╗██╗  ██╗",
+        "██╔══██╗██╔════╝    ██╔════╝██║     ██╔══██╗██╔════╝██║  ██║",
+        "██║  ██║█████╗      █████╗  ██║     ███████║███████╗███████║",
+        "██║  ██║██╔══╝      ██╔══╝  ██║     ██╔══██║╚════██║██╔══██║",
+        "██████╔╝███████╗    ██║     ███████╗██║  ██║███████║██║  ██║",
+        "╚═════╝ ╚══════╝    ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝",
+    ]
+    for line in art:
+        pad = max(0, (w - len(line)) // 2)
+        print(f"{BOLD}{BCYAN}{' ' * pad}{line}{RESET}")
+
+    # MMH tag — right-aligned
+    tag = "— MMH"
+    print(f"{BOLD}{DIM}{CYAN}{tag.rjust(w)}{RESET}")
+    print()
+    subtitle = "Data Engineering Flashcards  ·  sharpen your skills, one card at a time"
+    print(f"{DIM}{subtitle.center(w)}{RESET}")
+    print()
+    print(f"{BOLD}{BCYAN}{'█' * w}{RESET}")
+    print()
 
 
-# ─── Card display ─────────────────────────────────────────────────────────────
+# ─── Flashcard display ─────────────────────────────────────────────────────────
 
-def prompt_after_answer() -> bool:
-    """
-    After revealing an answer, ask the user what to do next.
-    ENTER always continues to next card. Only q or Ctrl+C quits.
-    """
-    hint = f"{DIM}ENTER = next card  •  q = quit{RESET}"
+def wrap_text(text: str, width: int) -> list[str]:
+    """Word-wrap text to fit within width."""
+    words = text.split()
+    lines, current = [], ""
+    for word in words:
+        if current and len(current) + 1 + len(word) > width:
+            lines.append(current)
+            current = word
+        else:
+            current = (current + " " + word).strip()
+    if current:
+        lines.append(current)
+    return lines or [""]
 
+
+def print_card(card: dict, index: int = 1) -> bool:
+    w        = _term_width()
+    bg, fg, accent, icon = get_theme(card["topic"])
+    topic    = card["topic"].upper()
+    ai_note  = f"{DIM}  ✦ AI{RESET}" if card.get("ai_generated") else ""
+    fs_note  = f"{DIM}  ☁ cloud{RESET}" if card.get("source") == "firestore" else ""
+    src_note = ai_note or fs_note
+
+    inner_w = w - 4  # inside card borders
+
+    # ── Header bar ──────────────────────────────────────────────────────────────
+    print()
+    print(card_top(w, accent))
+
+    # Topic badge row
+    badge     = f"{bg}{fg}{BOLD} {icon}{topic} {RESET}"
+    counter   = f"{DIM}#{index}{RESET}"
+    badge_row = badge + "  " + counter + src_note
+    print(card_row(badge_row, w, accent))
+
+    print(card_mid(w, accent))
+
+    # ── Question ─────────────────────────────────────────────────────────────
+    blank = card_row("", w, accent)
+    print(blank)
+
+    q_label = f"{BOLD}{BYELLOW}  Q  {RESET}"
+    print(card_row(q_label, w, accent))
+    print(blank)
+
+    q_lines = wrap_text(card["question"], inner_w - 4)
+    for line in q_lines:
+        print(card_row(f"    {BOLD}{BWHITE}{line}{RESET}", w, accent))
+
+    print(blank)
+    print(card_bot(w, accent))
+
+    # ── Reveal prompt ────────────────────────────────────────────────────────
+    print()
     try:
-        resp = input(f"\n  {hint}  ").strip().lower()
+        input(f"  {DIM}↵  Press ENTER to reveal answer{RESET}  ")
+    except (KeyboardInterrupt, EOFError):
+        print(f"\n\n  {BMAGENTA}👋  Goodbye! Keep learning.{RESET}\n")
+        sys.exit(0)
+
+    # ── Answer ───────────────────────────────────────────────────────────────
+    print()
+    print(card_top(w, BGREEN))
+
+    a_label = f"{BOLD}{BGREEN}  A  {RESET}"
+    print(card_row(a_label, w, BGREEN))
+    print(card_row("", w, BGREEN))
+
+    a_lines = wrap_text(card["answer"], inner_w - 4)
+    for line in a_lines:
+        print(card_row(f"    {WHITE}{line}{RESET}", w, BGREEN))
+
+    print(card_row("", w, BGREEN))
+    print(card_bot(w, BGREEN))
+
+    # ── Next prompt ──────────────────────────────────────────────────────────
+    print()
+    hint = (
+        f"  {DIM}↵ next card{RESET}"
+        f"  {DIM}·{RESET}"
+        f"  {BRED}q quit{RESET}"
+    )
+    try:
+        resp = input(hint + "  ").strip().lower()
     except KeyboardInterrupt:
-        return False
+        print(f"\n\n  {BMAGENTA}👋  Goodbye! Keep learning.{RESET}\n")
+        sys.exit(0)
     except EOFError:
-        return True  # non-interactive — keep going
+        return True
 
     if resp in ("q", "quit", "exit"):
         return False
     return True
-
-
-def print_card(card: dict, index: int = 1) -> bool:
-    """
-    Display a single flashcard.
-    Returns False if the user chose to quit, True to continue.
-    """
-    tc = topic_color(card["topic"])
-    ai_tag = f"  {DIM}✨ AI-generated{RESET}" if card.get("ai_generated") else ""
-    fs_tag = f"  {DIM}☁️  Firestore{RESET}"   if card.get("source") == "firestore" else ""
-    tag_line = ai_tag or fs_tag
-
-    print(f"\n{rule()}")
-    print(f"  {badge(card['topic'], tc)}  {DIM}#{index}{RESET}  {tag_line}")
-    print(rule())
-    print(f"\n  {BOLD}Q:{RESET} {card['question']}\n")
-    print(rule("·"))
-
-    # ── Wait for ENTER to reveal answer ──
-    try:
-        input(f"  {DIM}Press ENTER to reveal answer...{RESET}  ")
-    except (KeyboardInterrupt, EOFError):
-        print("\n\n  👋 Goodbye!\n")
-        sys.exit(0)
-
-    print(f"\n  {BOLD}{GREEN}A:{RESET} {card['answer']}\n")
-    print(rule())
-
-    # ── Ask what to do next ──
-    return prompt_after_answer()
 
 
 # ─── Source loading ────────────────────────────────────────────────────────────
@@ -118,21 +255,21 @@ def load_pool(topic: str | None, use_ai: bool, ai_count: int, use_firestore: boo
         from .firestore_client import fetch_cards_from_firestore
         fs_cards = fetch_cards_from_firestore(topic)
         if fs_cards:
-            print(f"  {DIM}☁️  Loaded {len(fs_cards)} card(s) from Firestore.{RESET}")
+            print(f"  {DIM}☁  Loaded {len(fs_cards)} card(s) from Firestore.{RESET}")
             pool.extend(fs_cards)
         else:
-            print(f"  {YELLOW}⚠️  Firestore returned no cards. Check your config.{RESET}")
+            print(f"  {BYELLOW}⚠  Firestore returned no cards. Check your config.{RESET}")
 
     if use_ai:
         ai_topic = topic or "data engineering"
-        print(f"  {DIM}✨ Generating {ai_count} AI card(s) for '{ai_topic}'...{RESET}")
+        print(f"  {DIM}✦  Generating {ai_count} AI card(s) for '{ai_topic}'...{RESET}")
         from .ai_generator import generate_ai_cards
         ai_cards = generate_ai_cards(ai_topic, ai_count)
         if ai_cards:
             pool.extend(ai_cards)
-            print(f"  {GREEN}✓  {len(ai_cards)} AI card(s) generated.{RESET}\n")
+            print(f"  {BGREEN}✓  {len(ai_cards)} AI card(s) ready.{RESET}\n")
         else:
-            print(f"  {RED}✗  AI generation failed. Is ANTHROPIC_API_KEY set?{RESET}")
+            print(f"  {BRED}✗  AI generation failed. Is ANTHROPIC_API_KEY set?{RESET}")
             print(f"     Run: {BOLD}de-flashcards-cli config{RESET}\n")
 
     return pool
@@ -141,75 +278,72 @@ def load_pool(topic: str | None, use_ai: bool, ai_count: int, use_firestore: boo
 # ─── Config wizard ─────────────────────────────────────────────────────────────
 
 def run_config_wizard():
-    print(f"\n{BOLD}⚙️  de-flashcards-cli Configuration{RESET}")
-    print(rule())
-    print("Configure API keys and integrations. Press ENTER to skip any field.\n")
+    w = _term_width()
+    print()
+    print(double_rule(w))
+    print(f"  {BOLD}{BCYAN}⚙  de-flashcards-cli  ·  Configuration{RESET}")
+    print(double_rule(w))
+    print(f"  {DIM}Press ENTER to skip any field.{RESET}\n")
 
     current_key = cfg.get("anthropic_api_key", "")
     masked = (current_key[:8] + "...") if current_key else "not set"
-    print(f"  {CYAN}Anthropic API Key{RESET} (current: {masked})")
-    print(f"  {DIM}Get yours at: https://console.anthropic.com{RESET}")
+    print(f"  {BOLD}{BCYAN}Anthropic API Key{RESET}  {DIM}(current: {masked}){RESET}")
+    print(f"  {DIM}→ console.anthropic.com{RESET}")
     val = input("  New key: ").strip()
     if val:
         cfg.set_value("anthropic_api_key", val)
-        print(f"  {GREEN}✓ Saved.{RESET}")
+        print(f"  {BGREEN}✓ Saved.{RESET}")
 
     print()
-
     current_proj = cfg.get("firestore_project_id", "")
-    print(f"  {CYAN}Firestore Project ID{RESET} (current: {current_proj or 'not set'})")
-    print(f"  {DIM}Found in your Firebase console under Project Settings.{RESET}")
+    print(f"  {BOLD}{BCYAN}Firestore Project ID{RESET}  {DIM}(current: {current_proj or 'not set'}){RESET}")
+    print(f"  {DIM}→ Firebase Console → Project Settings{RESET}")
     val = input("  Project ID: ").strip()
     if val:
         cfg.set_value("firestore_project_id", val)
-        print(f"  {GREEN}✓ Saved.{RESET}")
+        print(f"  {BGREEN}✓ Saved.{RESET}")
 
     print()
-
     current_cred = cfg.get("google_credentials", "")
-    print(f"  {CYAN}Google Service Account JSON path{RESET} (current: {current_cred or 'not set'})")
-    print(f"  {DIM}Path to your downloaded Firebase service account key file.{RESET}")
+    print(f"  {BOLD}{BCYAN}Service Account JSON path{RESET}  {DIM}(current: {current_cred or 'not set'}){RESET}")
+    print(f"  {DIM}→ Firebase → Service Accounts → Generate key{RESET}")
     val = input("  Path: ").strip()
     if val:
         cfg.set_value("google_credentials", val)
-        print(f"  {GREEN}✓ Saved.{RESET}")
+        print(f"  {BGREEN}✓ Saved.{RESET}")
 
-    print(f"\n{rule()}")
-    print(f"  {GREEN}{BOLD}Config saved to ~/.de-flashcards-cli/config.json{RESET}")
+    print()
+    print(double_rule(w))
+    print(f"  {BGREEN}{BOLD}Saved to ~/.de-flashcards-cli/config.json{RESET}")
     print(f"  Run {BOLD}de-flashcards-cli --help{RESET} to get started.\n")
 
 
-# ─── Main CLI ──────────────────────────────────────────────────────────────────
+# ─── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     cfg.apply_to_env()
 
     parser = argparse.ArgumentParser(
         prog="de-flashcards-cli",
-        description="📚 Data Engineering Flashcards — static, AI-generated, or from Firestore.",
+        description="Data Engineering Flashcards — static, AI-generated, or from Firestore.",
         formatter_class=argparse.RawTextHelpFormatter,
-        epilog=f"""Examples:
-  de-flashcards-cli                        # 1 random static card
-  de-flashcards-cli -n 5                   # 5 random static cards
-  de-flashcards-cli -t sql                 # random SQL card
-  de-flashcards-cli -t sql --all           # all SQL cards
-  de-flashcards-cli --ai                   # 1 AI-generated card (any topic)
-  de-flashcards-cli -t pipeline --ai -n 3  # 3 AI cards on pipelines
-  de-flashcards-cli --firestore            # pull cards from Firestore
-  de-flashcards-cli --list-topics          # show available topics
-  de-flashcards-cli config                 # set API keys & project IDs
+        epilog="""Examples:
+  de-flashcards-cli                        # random cards, infinite loop
+  de-flashcards-cli -t sql                 # SQL cards only
+  de-flashcards-cli --ai --topic spark     # AI-generated spark cards
+  de-flashcards-cli --firestore            # pull from Firestore
+  de-flashcards-cli --list-topics          # show topics
+  de-flashcards-cli config                 # set API keys
         """
     )
 
-    parser.add_argument("command",      nargs="?",  help="'config' to set API keys")
-    parser.add_argument("--topic", "-t", type=str,  help=f"Filter by topic: {', '.join(TOPICS)}")
-    parser.add_argument("--all",   "-a", action="store_true", help="Show all cards")
-    parser.add_argument("--count", "-n", type=int, default=1, help="Number of cards (default: 1)")
-    parser.add_argument("--ai",          action="store_true", help="Generate card(s) with Claude AI")
-    parser.add_argument("--ai-count",    type=int, default=1, help="How many AI cards to generate (default: 1)")
-    parser.add_argument("--firestore",   action="store_true", help="Include cards from Firestore")
-    parser.add_argument("--list-topics", "-l", action="store_true", help="List available topics")
-    parser.add_argument("--no-banner",   action="store_true", help="Skip the ASCII banner")
+    parser.add_argument("command",        nargs="?",  help="'config' to set API keys")
+    parser.add_argument("--topic", "-t",  type=str,   help=f"Filter by topic: {', '.join(TOPICS)}")
+    parser.add_argument("--ai",           action="store_true", help="Generate card(s) with Claude AI")
+    parser.add_argument("--ai-count",     type=int, default=1, help="How many AI cards to generate (default: 1)")
+    parser.add_argument("--firestore",    action="store_true", help="Include cards from Firestore")
+    parser.add_argument("--list-topics",  "-l", action="store_true", help="List available topics")
+    parser.add_argument("--no-banner",    action="store_true", help="Skip the ASCII banner")
 
     args = parser.parse_args()
 
@@ -221,12 +355,15 @@ def main():
         print_banner()
 
     if args.list_topics:
-        print(f"{BOLD}Available topics:{RESET}\n")
+        w = _term_width()
+        print(f"\n  {BOLD}Available topics{RESET}\n")
         for t in TOPICS:
-            count = sum(1 for c in FLASHCARDS if c["topic"] == t)
-            color = topic_color(t)
-            print(f"  {badge(t, color)}  {DIM}{count} static cards{RESET}")
-        print(f"\n  {DIM}Use --ai to generate cards on any topic (e.g., --topic dbt --ai){RESET}\n")
+            count  = sum(1 for c in FLASHCARDS if c["topic"] == t)
+            bg, fg, accent, icon = get_theme(t)
+            badge  = f"{bg}{fg}{BOLD} {icon}{t.upper()} {RESET}"
+            dots   = f"{DIM}{'·' * max(2, 18 - len(t))}{RESET}"
+            print(f"  {badge}  {dots}  {DIM}{count} cards{RESET}")
+        print(f"\n  {DIM}Tip: use --ai to generate cards on any topic, e.g. --topic dbt --ai{RESET}\n")
         return
 
     ai_count = args.ai_count if args.ai else 0
@@ -238,30 +375,32 @@ def main():
     )
 
     if not pool:
-        print(f"\n  {RED}No cards found.{RESET}")
+        print(f"\n  {BRED}No cards found.{RESET}")
         if args.topic:
-            print(f"  Topic '{args.topic}' not recognised in static cards.")
+            print(f"  Topic '{args.topic}' not found.")
             print(f"  Try: {BOLD}de-flashcards-cli --list-topics{RESET}\n")
         sys.exit(1)
 
-    print(f"  {DIM}Press ENTER to flip a card. Type 'q' anytime to quit.{RESET}\n")
+    hint_topic = f" [{args.topic}]" if args.topic else ""
+    print(f"  {DIM}Loaded {len(pool)} card(s){hint_topic}. Looping forever — q to quit.{RESET}\n")
 
-    # ── Infinite loop — keeps going until user types q or Ctrl+C ──────────────
-    seen   = []   # track shown cards to avoid immediate repeats
-    card_n = 0    # running counter for display
+    # ── Infinite shuffle loop ────────────────────────────────────────────────
+    seen   = []
+    card_n = 0
 
     while True:
-        # Reshuffle when the whole pool has been seen
         if not seen:
             seen = pool[:]
             random.shuffle(seen)
+            if card_n > 0:   # subtle "deck reshuffled" notice after first cycle
+                print(f"\n  {DIM}── deck reshuffled ──{RESET}\n")
 
         card   = seen.pop()
         card_n += 1
 
         keep_going = print_card(card, index=card_n)
         if not keep_going:
-            print(f"\n  👋 {GREEN}Goodbye! Keep learning. 🚀{RESET}\n")
+            print(f"\n  {BMAGENTA}{BOLD}👋  Goodbye! Keep learning. 🚀{RESET}\n")
             sys.exit(0)
 
 
