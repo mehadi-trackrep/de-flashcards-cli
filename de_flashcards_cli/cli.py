@@ -275,6 +275,81 @@ def load_pool(topic: str | None, use_ai: bool, ai_count: int, use_firestore: boo
     return pool
 
 
+
+# ─── Custom help ───────────────────────────────────────────────────────────────
+
+def print_help():
+    w = _term_width()
+    print()
+    print(f"{BOLD}{BCYAN}{'━' * w}{RESET}")
+    print(f"  {BOLD}{BCYAN}de-flashcards-cli{RESET}  {DIM}— Data Engineering Flashcards{RESET}")
+    print(f"{BOLD}{BCYAN}{'━' * w}{RESET}")
+
+    def section(title):
+        print()
+        print(f"  {BOLD}{BYELLOW}{title}{RESET}")
+        print(f"  {DIM}{'─' * (w - 4)}{RESET}")
+
+    def cmd(usage, desc, example=None):
+        print(f"  {BWHITE}{usage:<46}{RESET}  {DIM}{desc}{RESET}")
+        if example:
+            print(f"  {DIM}{'':46}  e.g. {BCYAN}{example}{RESET}")
+
+    def flag(short, long, desc):
+        combo = f"{short}, {long}" if short else f"    {long}"
+        print(f"  {BGREEN}{combo:<26}{RESET}  {DIM}{desc}{RESET}")
+
+    section("BASIC")
+    cmd("de-flashcards-cli",               "Start infinite flashcard loop (default)")
+    cmd("de-flashcards-cli help",          "Show this help screen")
+    cmd("de-flashcards-cli config",        "Set API keys interactively")
+
+    section("TOPIC FILTER")
+    cmd("de-flashcards-cli -t <topic>",         "Loop cards for a specific topic",
+        "de-flashcards-cli -t sql")
+    cmd("de-flashcards-cli --list-topics",      "List all available topics with card counts")
+
+    section("COUNT & MODE")
+    cmd("de-flashcards-cli -n <N>",             "Show N random cards then exit",
+        "de-flashcards-cli -n 5")
+    cmd("de-flashcards-cli --all",              "Show every card once then exit")
+    cmd("de-flashcards-cli -t <topic> --all",   "All cards for a topic then exit",
+        "de-flashcards-cli -t pipeline --all")
+    cmd("de-flashcards-cli -t <topic> -n <N>",  "N random cards from a topic",
+        "de-flashcards-cli -t sql -n 3")
+
+    section("AI-GENERATED CARDS  (requires ANTHROPIC_API_KEY)")
+    cmd("de-flashcards-cli --ai",                 "Generate 1 AI card on random DE topic")
+    cmd("de-flashcards-cli --ai --ai-count <N>",  "Generate N AI cards",
+        "de-flashcards-cli --ai --ai-count 5")
+    cmd("de-flashcards-cli -t <topic> --ai",      "AI cards on a specific topic",
+        "de-flashcards-cli -t spark --ai --ai-count 3")
+
+    section("FIRESTORE  (requires Firebase config)")
+    cmd("de-flashcards-cli --firestore",          "Mix static + Firestore cards")
+    cmd("de-flashcards-cli -t sql --firestore",   "Topic-filtered Firestore cards")
+
+    section("FLAGS REFERENCE")
+    flag("-t", "--topic <name>",   "Filter by topic: sql, python, pipeline, warehouse, streaming, cloud")
+    flag("-n", "--count <N>",      "Show N cards then stop")
+    flag("-a", "--all",            "Show all cards in pool then stop")
+    flag("",   "--ai",             "Enable AI card generation")
+    flag("",   "--ai-count <N>",   "Number of AI cards to generate (default: 1)")
+    flag("",   "--firestore",      "Pull additional cards from Firestore")
+    flag("-l", "--list-topics",    "Print available topic list")
+    flag("",   "--no-banner",      "Skip the ASCII art banner")
+
+    section("CONTROLS  (while a session is running)")
+    print(f"  {BGREEN}ENTER{RESET}             {DIM}Reveal answer / go to next card{RESET}")
+    print(f"  {BRED}q{RESET}  {DIM}or{RESET}  {BRED}quit{RESET}       {DIM}Exit the session gracefully{RESET}")
+    print(f"  {BRED}Ctrl+C{RESET}            {DIM}Force quit anytime{RESET}")
+
+    print()
+    print(f"{BOLD}{BCYAN}{'━' * w}{RESET}")
+    print(f"  {DIM}Tip: run {BCYAN}de-flashcards-cli config{RESET}{DIM} to set up AI and Firestore.{RESET}")
+    print(f"{BOLD}{BCYAN}{'━' * w}{RESET}")
+    print()
+
 # ─── Config wizard ─────────────────────────────────────────────────────────────
 
 def run_config_wizard():
@@ -327,21 +402,10 @@ def main():
         prog="de-flashcards-cli",
         description="Data Engineering Flashcards — static, AI-generated, or from Firestore.",
         formatter_class=argparse.RawTextHelpFormatter,
-        epilog="""Examples:
-  de-flashcards-cli                        # random cards, infinite loop
-  de-flashcards-cli -n 3                   # show 3 random cards then stop
-  de-flashcards-cli -t sql                 # SQL cards, infinite loop
-  de-flashcards-cli -t sql -n 5            # 5 random SQL cards then stop
-  de-flashcards-cli --topic pipeline --all # all pipeline cards then stop
-  de-flashcards-cli --list-topics          # show all topics
-  de-flashcards-cli --ai                   # 1 AI-generated card
-  de-flashcards-cli --topic spark --ai --ai-count 3  # 3 AI spark cards
-  de-flashcards-cli --firestore            # pull from Firestore
-  de-flashcards-cli config                 # set API keys
-        """
+        epilog="Run 'de-flashcards-cli help' for a full, colorful command reference.",
     )
 
-    parser.add_argument("command",        nargs="?",  help="'config' to set API keys")
+    parser.add_argument("command",        nargs="?",  help="config | help")
     parser.add_argument("--topic", "-t",  type=str,   help=f"Filter by topic: {', '.join(TOPICS)}")
     parser.add_argument("--count", "-n",  type=int,   default=None, help="Show N random cards then stop (default: infinite loop)")
     parser.add_argument("--all",   "-a",  action="store_true", help="Show all cards for the topic then stop")
@@ -351,7 +415,16 @@ def main():
     parser.add_argument("--list-topics",  "-l", action="store_true", help="List available topics")
     parser.add_argument("--no-banner",    action="store_true", help="Skip the ASCII banner")
 
+    # Check BEFORE parse_args so argparse never intercepts --help / -h
+    if "--help" in sys.argv or "-h" in sys.argv or (len(sys.argv) > 1 and sys.argv[1] == "help"):
+        print_help()
+        return
+
     args = parser.parse_args()
+
+    if args.command == "help":
+        print_help()
+        return
 
     if args.command == "config":
         run_config_wizard()
