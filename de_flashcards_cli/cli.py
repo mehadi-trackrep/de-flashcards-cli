@@ -191,9 +191,9 @@ def print_card(card: dict, index: int = 1) -> bool:
     print(card_row(q_label, w, accent))
     print(blank)
 
-    q_lines = wrap_text(card["question"], inner_w - 4)
+    q_lines = wrap_text(card["question"], inner_w - 6)
     for line in q_lines:
-        print(card_row(f"    {BOLD}{BWHITE}{line}{RESET}", w, accent))
+        print(card_row(f"  {BYELLOW}▌{RESET}  {BOLD}{BWHITE}{line}{RESET}", w, accent))
 
     print(blank)
     print(card_bot(w, accent))
@@ -214,9 +214,9 @@ def print_card(card: dict, index: int = 1) -> bool:
     print(card_row(a_label, w, BGREEN))
     print(card_row("", w, BGREEN))
 
-    a_lines = wrap_text(card["answer"], inner_w - 4)
+    a_lines = wrap_text(card["answer"], inner_w - 6)
     for line in a_lines:
-        print(card_row(f"    {WHITE}{line}{RESET}", w, BGREEN))
+        print(card_row(f"  {BGREEN}▌{RESET}  {RESET}{line}{RESET}", w, BGREEN))
 
     print(card_row("", w, BGREEN))
     print(card_bot(w, BGREEN))
