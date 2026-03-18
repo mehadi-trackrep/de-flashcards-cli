@@ -329,16 +329,22 @@ def main():
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="""Examples:
   de-flashcards-cli                        # random cards, infinite loop
-  de-flashcards-cli -t sql                 # SQL cards only
-  de-flashcards-cli --ai --topic spark     # AI-generated spark cards
+  de-flashcards-cli -n 3                   # show 3 random cards then stop
+  de-flashcards-cli -t sql                 # SQL cards, infinite loop
+  de-flashcards-cli -t sql -n 5            # 5 random SQL cards then stop
+  de-flashcards-cli --topic pipeline --all # all pipeline cards then stop
+  de-flashcards-cli --list-topics          # show all topics
+  de-flashcards-cli --ai                   # 1 AI-generated card
+  de-flashcards-cli --topic spark --ai --ai-count 3  # 3 AI spark cards
   de-flashcards-cli --firestore            # pull from Firestore
-  de-flashcards-cli --list-topics          # show topics
   de-flashcards-cli config                 # set API keys
         """
     )
 
     parser.add_argument("command",        nargs="?",  help="'config' to set API keys")
     parser.add_argument("--topic", "-t",  type=str,   help=f"Filter by topic: {', '.join(TOPICS)}")
+    parser.add_argument("--count", "-n",  type=int,   default=None, help="Show N random cards then stop (default: infinite loop)")
+    parser.add_argument("--all",   "-a",  action="store_true", help="Show all cards for the topic then stop")
     parser.add_argument("--ai",           action="store_true", help="Generate card(s) with Claude AI")
     parser.add_argument("--ai-count",     type=int, default=1, help="How many AI cards to generate (default: 1)")
     parser.add_argument("--firestore",    action="store_true", help="Include cards from Firestore")
@@ -382,26 +388,54 @@ def main():
         sys.exit(1)
 
     hint_topic = f" [{args.topic}]" if args.topic else ""
-    print(f"  {DIM}Loaded {len(pool)} card(s){hint_topic}. Looping forever — q to quit.{RESET}\n")
 
-    # ── Infinite shuffle loop ────────────────────────────────────────────────
-    seen   = []
-    card_n = 0
+    # ── Decide mode: finite vs infinite ──────────────────────────────────────
+    if args.all:
+        # Show every card in pool once, then done
+        cards  = pool[:]
+        random.shuffle(cards)
+        finite = True
+        mode_hint = f"Showing all {len(cards)} card(s){hint_topic}. Type q to quit early."
+    elif args.count is not None:
+        # Show exactly N random cards, then done
+        cards  = random.sample(pool, min(args.count, len(pool)))
+        finite = True
+        mode_hint = f"Showing {len(cards)} card(s){hint_topic}. Type q to quit early."
+    else:
+        # Default: infinite shuffle loop
+        cards  = None
+        finite = False
+        mode_hint = f"Loaded {len(pool)} card(s){hint_topic}. Looping forever — q to quit."
 
-    while True:
-        if not seen:
-            seen = pool[:]
-            random.shuffle(seen)
-            if card_n > 0:   # subtle "deck reshuffled" notice after first cycle
-                print(f"\n  {DIM}── deck reshuffled ──{RESET}\n")
+    print(f"  {DIM}{mode_hint}{RESET}\n")
 
-        card   = seen.pop()
-        card_n += 1
+    if finite:
+        # ── Finite mode: play through the list once ──────────────────────────
+        for i, card in enumerate(cards, 1):
+            keep_going = print_card(card, index=i)
+            if not keep_going:
+                print(f"\n  {BMAGENTA}{BOLD}👋  Goodbye! Keep learning. 🚀{RESET}\n")
+                sys.exit(0)
+        print(f"\n  {BGREEN}{BOLD}✓  All done! Well studied. 🚀{RESET}\n")
+    else:
+        # ── Infinite mode: shuffle loop ──────────────────────────────────────
+        seen   = []
+        card_n = 0
 
-        keep_going = print_card(card, index=card_n)
-        if not keep_going:
-            print(f"\n  {BMAGENTA}{BOLD}👋  Goodbye! Keep learning. 🚀{RESET}\n")
-            sys.exit(0)
+        while True:
+            if not seen:
+                seen = pool[:]
+                random.shuffle(seen)
+                if card_n > 0:
+                    print(f"\n  {DIM}── deck reshuffled ──{RESET}\n")
+
+            card   = seen.pop()
+            card_n += 1
+
+            keep_going = print_card(card, index=card_n)
+            if not keep_going:
+                print(f"\n  {BMAGENTA}{BOLD}👋  Goodbye! Keep learning. 🚀{RESET}\n")
+                sys.exit(0)
 
 
 if __name__ == "__main__":
