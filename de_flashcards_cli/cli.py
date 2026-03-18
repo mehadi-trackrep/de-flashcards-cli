@@ -246,10 +246,43 @@ def print_card(card: dict, index: int = 1) -> bool:
 def load_pool(topic: str | None, use_ai: bool, ai_count: int, use_firestore: bool) -> list[dict]:
     pool = []
 
-    static = FLASHCARDS
-    if topic:
-        static = [c for c in static if c["topic"] == topic.lower()]
-    pool.extend(static)
+    from .sheets_loader import (
+        is_configured, cache_exists,
+        sync_from_sheets, load_cards as load_sheets,
+    )
+
+    # ── Source decision ───────────────────────────────────────────────────────
+    # If Google Sheets is configured → cards.json is the primary source.
+    # Static flashcards.py is ONLY used when sheets is not configured at all.
+    use_sheets = is_configured()
+
+    if use_sheets:
+        # First run: cache missing → fetch from network now
+        if not cache_exists():
+            print(f"\n  {BYELLOW}First run — syncing cards from Google Sheets...{RESET}")
+            try:
+                sync_from_sheets(verbose=True)
+                print()
+            except RuntimeError as e:
+                print(f"  {BRED}✗  Sync failed: {e}{RESET}")
+                print(f"  {DIM}Run 'de-flashcards-cli sync' to retry, or check your Sheet ID.{RESET}\n")
+                use_sheets = False   # fall through to static this session only
+
+    if use_sheets and cache_exists():
+        # Primary source: read from cards.json (no network)
+        sheets_cards = load_sheets(topic)
+        if sheets_cards:
+            pool.extend(sheets_cards)
+        else:
+            # Sheets configured and cache exists but zero cards match topic
+            print(f"  {BYELLOW}⚠  No sheet cards found for topic '{topic}'.{RESET}")
+            print(f"  {DIM}Add rows with topic='{topic}' to your sheet and run: de-flashcards-cli sync{RESET}\n")
+    else:
+        # Fallback: no sheets configured → use built-in static cards
+        static = FLASHCARDS
+        if topic:
+            static = [c for c in static if c["topic"] == topic.lower()]
+        pool.extend(static)
 
     if use_firestore:
         from .firestore_client import fetch_cards_from_firestore
@@ -302,7 +335,9 @@ def print_help():
     section("BASIC")
     cmd("de-flashcards-cli",               "Start infinite flashcard loop (default)")
     cmd("de-flashcards-cli help",          "Show this help screen")
-    cmd("de-flashcards-cli config",        "Set API keys interactively")
+    cmd("de-flashcards-cli config",        "Set API keys + Google Sheet ID")
+    cmd("de-flashcards-cli sync",          "Re-sync cards from Google Sheets",
+        "de-flashcards-cli sync")
 
     section("TOPIC FILTER")
     cmd("de-flashcards-cli -t <topic>",         "Loop cards for a specific topic",
@@ -317,6 +352,12 @@ def print_help():
         "de-flashcards-cli -t pipeline --all")
     cmd("de-flashcards-cli -t <topic> -n <N>",  "N random cards from a topic",
         "de-flashcards-cli -t sql -n 3")
+
+    section("GOOGLE SHEETS  (one-time setup via config)")
+    cmd("de-flashcards-cli config",              "Paste your Sheet ID, triggers first sync")
+    cmd("de-flashcards-cli sync",                "Re-fetch sheet and refresh local cache")
+    print(f"  {DIM}Sheet format — columns: topic | question | answer{RESET}")
+    print(f"  {DIM}Share setting: Anyone with the link → Viewer{RESET}")
 
     section("AI-GENERATED CARDS  (requires ANTHROPIC_API_KEY)")
     cmd("de-flashcards-cli --ai",                 "Generate 1 AI card on random DE topic")
@@ -388,6 +429,27 @@ def run_config_wizard():
         print(f"  {BGREEN}✓ Saved.{RESET}")
 
     print()
+    current_meta = cfg.get_sheets_meta()
+    current_sid  = current_meta.get("sheet_id", "")
+    current_gid  = current_meta.get("gid", "0")
+    print(f"  {BOLD}{BCYAN}Google Sheet ID{RESET}  {DIM}(current: {current_sid or 'not set'}){RESET}")
+    print(f"  {DIM}→ Sheet URL: docs.google.com/spreadsheets/d/<SHEET_ID>/edit{RESET}")
+    print(f"  {DIM}→ Make sure the sheet is shared: Anyone with the link → Viewer{RESET}")
+    val = input("  Sheet ID: ").strip()
+    if val:
+        gid_val = input(f"  Sheet tab GID (default: {current_gid}, press ENTER to keep): ").strip()
+        from .sheets_loader import save_sheet_config, sync_from_sheets
+        save_sheet_config(val, gid_val or current_gid)
+        print(f"  {BGREEN}✓ Saved.{RESET}")
+        print()
+        do_sync = input(f"  {DIM}Sync cards from sheet now? [Y/n]: {RESET}").strip().lower()
+        if do_sync != "n":
+            try:
+                sync_from_sheets(verbose=True)
+            except RuntimeError as e:
+                print(f"  {BRED}✗ {e}{RESET}")
+
+    print()
     print(double_rule(w))
     print(f"  {BGREEN}{BOLD}Saved to ~/.de-flashcards-cli/config.json{RESET}")
     print(f"  Run {BOLD}de-flashcards-cli --help{RESET} to get started.\n")
@@ -405,7 +467,7 @@ def main():
         epilog="Run 'de-flashcards-cli help' for a full, colorful command reference.",
     )
 
-    parser.add_argument("command",        nargs="?",  help="config | help")
+    parser.add_argument("command",        nargs="?",  help="config | sync | help")
     parser.add_argument("--topic", "-t",  type=str,   help=f"Filter by topic: {', '.join(TOPICS)}")
     parser.add_argument("--count", "-n",  type=int,   default=None, help="Show N random cards then stop (default: infinite loop)")
     parser.add_argument("--all",   "-a",  action="store_true", help="Show all cards for the topic then stop")
@@ -428,6 +490,20 @@ def main():
 
     if args.command == "config":
         run_config_wizard()
+        return
+
+    if args.command == "sync":
+        from .sheets_loader import sync_from_sheets, is_configured
+        if not is_configured():
+            print(f"\n  {BRED}No sheet configured. Run: de-flashcards-cli config{RESET}\n")
+            sys.exit(1)
+        print()
+        try:
+            sync_from_sheets(verbose=True)
+            print(f"  {BGREEN}✓  Local cache updated. Run de-flashcards-cli to start.{RESET}\n")
+        except RuntimeError as e:
+            print(f"  {BRED}✗  {e}{RESET}\n")
+            sys.exit(1)
         return
 
     if not args.no_banner:

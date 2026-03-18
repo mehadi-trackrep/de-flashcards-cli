@@ -81,3 +81,12 @@ def apply_to_env():
     for cfg_key, env_key in mapping.items():
         if cfg_key in data and not os.environ.get(env_key):
             os.environ[env_key] = data[cfg_key]
+
+
+def get_sheets_meta() -> dict:
+    """Return Google Sheets metadata (sheet_id, gid) from config.json."""
+    data = _load()
+    return {
+        "sheet_id": data.get("sheet_id", ""),
+        "gid":      data.get("gid", "0"),
+    }
