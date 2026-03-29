@@ -6,7 +6,7 @@ saves them to ~/.de-flashcards-cli/cards.json, and reads
 from that local cache on every subsequent run.
 
 Sheet format (first row = header):
-  topic | question | answer
+  topic | question | answer | image_url  (image_url is optional)
 
 To make your sheet fetchable:
   File → Share → Anyone with the link → Viewer
@@ -118,17 +118,21 @@ def _parse_csv(raw_csv: str) -> list[dict]:
 
     cards = []
     for row in reader:
-        topic    = row.get("topic",    "").strip().lower()
-        question = row.get("question", "").strip()
-        answer   = row.get("answer",   "").strip()
+        topic     = row.get("topic",     "").strip().lower()
+        question  = row.get("question",  "").strip()
+        answer    = row.get("answer",    "").strip()
+        image_url = row.get("image_url", "").strip()
         if not topic or not question or not answer:
             continue
-        cards.append({
+        card: dict = {
             "topic":    topic,
             "question": question,
             "answer":   answer,
             "source":   "sheets",
-        })
+        }
+        if image_url:
+            card["image_url"] = image_url
+        cards.append(card)
     return cards
 
 

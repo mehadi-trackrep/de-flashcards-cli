@@ -146,6 +146,12 @@ def print_banner():
 
 # ─── Flashcard display ─────────────────────────────────────────────────────────
 
+def clickable_link(url: str, label: str = None) -> str:
+    """Return an OSC 8 hyperlink (clickable in supported terminals)."""
+    text = label or url
+    return f"\033]8;;{url}\033\\{BCYAN}{BOLD}{text}{RESET}\033]8;;\033\\"
+
+
 def wrap_text(text: str, width: int) -> list[str]:
     """Word-wrap text to fit within width."""
     words = text.split()
@@ -219,6 +225,16 @@ def print_card(card: dict, index: int = 1) -> bool:
         print(card_row(f"  {BGREEN}▌{RESET}  {RESET}{line}{RESET}", w, BGREEN))
 
     print(card_row("", w, BGREEN))
+
+    # ── Image URL (optional) ─────────────────────────────────────────────────
+    image_url = card.get("image_url", "").strip()
+    if image_url:
+        print(card_mid(w, BGREEN))
+        link      = clickable_link(image_url, "🔗  Preview image")
+        img_label = f"  {DIM}img{RESET}  {link}"
+        print(card_row(img_label, w, BGREEN))
+        print(card_row("", w, BGREEN))
+
     print(card_bot(w, BGREEN))
 
     # ── Next prompt ──────────────────────────────────────────────────────────
@@ -510,14 +526,28 @@ def main():
         print_banner()
 
     if args.list_topics:
+        from .sheets_loader import is_configured, cache_exists, load_cards as load_sheets, get_topics as get_sheet_topics
         w = _term_width()
         print(f"\n  {BOLD}Available topics{RESET}\n")
-        for t in TOPICS:
-            count  = sum(1 for c in FLASHCARDS if c["topic"] == t)
+
+        use_sheets = is_configured() and cache_exists()
+        if use_sheets:
+            all_cards = load_sheets()
+            topics    = get_sheet_topics()
+            source_note = f"  {DIM}(from Google Sheets · {len(all_cards)} cards total){RESET}"
+        else:
+            all_cards   = FLASHCARDS
+            topics      = TOPICS
+            source_note = f"  {DIM}(built-in cards){RESET}"
+
+        for t in topics:
+            count  = sum(1 for c in all_cards if c["topic"] == t)
             bg, fg, accent, icon = get_theme(t)
             badge  = f"{bg}{fg}{BOLD} {icon}{t.upper()} {RESET}"
             dots   = f"{DIM}{'·' * max(2, 18 - len(t))}{RESET}"
             print(f"  {badge}  {dots}  {DIM}{count} cards{RESET}")
+
+        print(source_note)
         print(f"\n  {DIM}Tip: use --ai to generate cards on any topic, e.g. --topic dbt --ai{RESET}\n")
         return
 
